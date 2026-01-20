@@ -1,36 +1,73 @@
-name: GitHub Action Name
-description: A GitHub Action Descriptionto Open a specified GitHub issue using the GitHub API
+name: Creat Octopus Deploy Release
+description: Create a new Octopus Deploy release
 author: Lee Lott
 
 inputs:
-  input-1:
-    description: 'Description of input'
+  octopus-url:
+    description: 'The instance URL hosting Octopus Deploy'
     required: true
-  input-2:
-    description: 'Description of input'
+  octopus-api-key:
+    description: 'The API key used to access Octopus Deploy'
     required: true
-  input-3:
-    description: 'Description of input'
+  octopus-space:
+    description: 'The name of the Octopus Deploy space within which this command will be executed'
     required: true
-
-outputs:
-  result:
-    description: 'Result of the action ("success" or "failure")'
-    value: ${{ steps.action.outputs.result }}
-  error-message:
-    description: 'Error message if the action fails'
-    value: ${{ steps.action.outputs.error-message }}
+  octopus-project-name:
+    description: 'The name of the Octopus Deploy project associated with this release.'
+    required: true
+  octopus-channel-name:
+    description: 'The name of the Octopus Deploy channel to use for the new release'
+    required: true
+  octopus-package-name:
+    description: 'The name of the Octopus Deploy package to use for this release'
+    required: true
+  octopus-package-version:
+    description: 'The version number of the package to use for this release.'
+    required: true
+  octopus-package-path:
+    description: 'The full path to the package to upload to Octopus Deploy'
+    required: true
 
 runs:
-  using: composite
+  using: "composite"
   steps:
-    - name: Action Name
-      id: action
-      shell: pwsh
-      run: |        
-        . "${{ github.action_path }}/action.ps1"
-        run_action `
-          -Input1 "${{ inputs.input-1 }}" `
-          -Input2 "${{ inputs.input-2 }}" `
-          -Inpute3 "${{ inputs.input-3 }}" `
-      
+    - name: Push Package To Octopus Deploy
+      shell: powershell
+      run: |
+         $pushCommand = "C:\Utilities\Octopus\octo.exe push --package=""${{ inputs.octopus-package-path }}"" --server=""${{ inputs.octopus-url }}"" --apiKey=""${{ inputs.octopus-api-key }}"" --space=""${{ inputs.octopus-space }}"" --overwrite-mode=OverwriteExisting"
+         Write-Host $pushCommand
+         Invoke-Expression $pushCommand
+
+    - name: Generate Build Information
+      shell: powershell
+      run: |
+        $buildInfo = @{
+          BuildNumber = "${{ github.run_number }}"
+          BuildUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          Branch = "${{ github.ref_name }}"
+          VcsCommitNumber = "${{ github.sha }}"
+          VcsType = "Git"
+          VcsRoot = "${{ github.server_url }}/${{ github.repository }}"
+        }
+        $buildInfoJson = $buildInfo | ConvertTo-Json -Depth 10
+        New-Item -Path "buildInfo" -ItemType Directory -Force
+        $buildInfoJson | Out-File -FilePath "buildInfo/${{ inputs.octopus-package-name }}.json" -Encoding UTF8
+
+    - name: Upload Build Information
+      shell: powershell
+      run: |
+        $commandString = "C:\Utilities\Octopus\octo.exe build-information --package-id=""${{ inputs.octopus-package-name }}"" --version=""${{ inputs.octopus-package-version }}"" --file=""buildInfo/${{ inputs.octopus-package-name }}.json"" --server=""${{ inputs.octopus-url }}"" --apiKey=""${{ inputs.octopus-api-key }}"" --space=""${{ inputs.octopus-space }}"" --overwrite-mode=OverwriteExisting"
+        Write-Host $commandString
+        Invoke-Expression $commandString
+
+    - name: Create Release
+      shell: powershell
+      run: |
+        C:\Utilities\Octopus\octo.exe create-release --project "${{ inputs.octopus-project-name }}" --server "${{ inputs.octopus-url }}" --apiKey "${{ inputs.octopus-api-key }}" --space "${{ inputs.octopus-space }}" --channel "${{ inputs.octopus-channel-name }}" --version "${{ inputs.octopus-package-version }}" --package "${{ inputs.octopus-package-name }}:${{ inputs.octopus-package-version }}" --progress
+
+    - name: Add to Job Summary
+      shell: powershell
+      run: |
+        "# Octopus Deployment Summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        "Created release for package **${{ inputs.octopus-package-name }}.${{ inputs.octopus-package-version }}** on Octopus project **${{ inputs.octopus-project-name }}** in space **${{ inputs.octopus-space }}**." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        "Channel: ${{ inputs.octopus-channel-name }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8      
