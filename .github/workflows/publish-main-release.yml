@@ -75,7 +75,7 @@ jobs:
           permission-deployments: write
           
       - name: Deploy GitHub Action
-        uses: lee-lott-actions/deploy-github-action@v3
+        uses: lee-lott-actions/deploy-github-action@v2
         with:
           version-tag: ${{ env.version-tag }}
           branch-name: ${{ github.ref_name }}
